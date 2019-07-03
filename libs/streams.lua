@@ -1,57 +1,62 @@
 lpeg = require("lpeg")
 
-local l = {}
-lpeg.locale(l)
+local stream = { char = {} }
+lpeg.locale(stream.char)
 
-local I = lpeg.Cp()
+local l = stream.char
+
 local P = lpeg.P
+local G = lpeg.Cg
+local S = lpeg.S
 
-function anywhere (p)
-	return lpeg.P{ p + 1 * lpeg.V(1) }
-end
-
-function anywhere_limited (p, num)
-	return (1 - lpeg.P(p))^-num * p
-end
-
-function chars (num)
-	local output = lpeg.P(true)
-
-	for i = 1, num do
-		output = output * (lpeg.P(1) - lpeg.P(" "))
+function stream.repeat_exactly(pattern, times)
+	local output = P(true)
+	
+	for i = 1, times do
+		output = output * pattern
 	end
-
+	
 	return output
 end
 
-function digs (num)
-	local output = lpeg.P(true)
-
-	for i = 1, num do
-		output = output * l.digit
+function stream.basic_bind (pattern)
+	return function(width)
+		if (width == nil) then
+			return pattern^1
+		else
+			return stream.repeat_exactly(pattern, width)
+		end
 	end
-
-	return output
 end
 
-converters = {
-	characters = { format = "s", type = "input", bind = chars },
-	digits     = { format = "d", type = "input", bind = digs }
-}
-
-function build_replace(data)
-	return lpeg.Cg(P'%' * (l.digit^0 / data.bind) * P(data.format) * #(l.space + P(-1)))
+local function floating_point (width)
+	local function maybe(p) return p^-1 end
+	local mpm = maybe(S("+-"))
+	local digits = l.digit^1
+	local dot = P(".")
+	local exp = S("eE")
+	
+	local float = mpm * digits * maybe(dot * digits) * maybe(exp * mpm * digits)
+	
+	return float
 end
 
 function all_formats()
 	local output = lpeg.P(false)
 	
 	for key, value in pairs(converters) do
+		local temp = G(P'%' * (l.digit^0 / tonumber / value.bind) * P(value.format) * #(-l.alpha))
 		output = output + build_replace(value)
 	end
 	
 	return output
 end
+
+converters = {
+	characters = { format = "s", type = "input", bind = stream.basic_bind(P(1) - l.space) },
+	digits     = { format = "d", type = "input", bind = stream.basic_bind(l.digit) },
+	float      = { format = "f", type = "input", bind = floating_point }
+}
 
 converter = all_formats()
 rawtext = (P(1) - '%')^1 / P
@@ -59,7 +64,7 @@ ctrl = P'%%' / "%%"
 item = rawtext + converter + ctrl
 line = lpeg.Ct(item^1)
 
-text = "This is %5s in the middle %3d"
+text = "This is %f"
 
 match_table = line:match(text)
 
@@ -73,4 +78,4 @@ new_match = lpeg.C(new_match)
 
 --new_match = lpeg.C(lpeg.P(text:sub(1, match_table[1] - 1)) * match_table.replace * lpeg.P(text:sub(match_table[2])))
 
-print(new_match:match "This is stuff in the middle 123")
+print(new_match:match "This is 3.14e15")
