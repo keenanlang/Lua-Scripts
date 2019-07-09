@@ -13,6 +13,10 @@ local G = lpeg.Cg
 local S = lpeg.S
 
 function patt.max_width(pattern, max_width)
+	if (max_width == nil) then
+		return pattern
+	end
+
     return lpeg.Cmt(lpeg.P(true),
         function(s, i)
 			local match = nil
@@ -62,11 +66,7 @@ patt.floating_point = patt.signed_decimal * patt.opt(S("eE") * patt.signed_int)
 
 function patt.basic_read (pattern, to_apply)
 	return function(flags)
-		if (flags.width == nil) then
-			return C(pattern) / to_apply
-		else
-			return C(patt.max_width(pattern, flags.width)) / to_apply
-		end
+		return C(patt.max_width(pattern, flags.width)) / to_apply
 	end
 end
 
