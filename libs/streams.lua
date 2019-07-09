@@ -1,36 +1,71 @@
 lpeg = require("lpeg")
 pprint = require("pprint")
 
-local stream = { char = {}, inputs = {}, outputs = {} }
-lpeg.locale(stream.char)
+local patt = {}
+lpeg.locale(patt)
 
-local l = stream.char
+patt.inputs = {}
+patt.outputs = {}
 
 local P = lpeg.P
 local C = lpeg.C
 local G = lpeg.Cg
 local S = lpeg.S
 
-function stream.maybe(pattern)
+function patt.max_width(pattern, max_width)
+    return lpeg.Cmt(lpeg.P(true),
+        function(s, i)
+			local match = nil
+			local last_match = nil
+			local last_offset = 0
+			local extract
+			local offset
+
+			for index = 1, max_width do
+				extract, offset = lpeg.match(C(P(index)) * lpeg.Cp(), s, i)
+
+				if (offset == nil) then
+					if (last_match == nil) then
+						return false
+					else
+						return last_offset
+					end
+				end
+
+				match = lpeg.match(C(pattern), extract)
+
+				if (match ~= nil) then
+					last_match = match
+
+					if (#match == #extract) then
+						last_offset = offset
+					end
+				end
+			end
+
+			return last_offset
+        end)
+end
+
+function patt.opt(pattern)
 	return pattern^-1
 end
 
-function stream.repeat_exactly(pattern, times)
-	local output = P(true)
+patt.sign = S("+-")
+patt.optsign = patt.opt(patt.sign)
 
-	for i = 1, times do
-		output = output * pattern
-	end
+patt.uint = patt.digit^1
+patt.signed_int = patt.optsign * patt.uint
+patt.decimal = patt.uint * patt.opt(P'.' * patt.uint)
+patt.signed_decimal = patt.optsign * patt.decimal
+patt.floating_point = patt.signed_decimal * patt.opt(S("eE") * patt.signed_int)
 
-	return output
-end
-
-function stream.basic_read (pattern, to_apply)
+function patt.basic_read (pattern, to_apply)
 	return function(flags)
 		if (flags.width == nil) then
-			return C(pattern^1) / to_apply
+			return C(pattern) / to_apply
 		else
-			return C(stream.repeat_exactly(pattern, flags.width)) / to_apply
+			return C(patt.max_width(pattern, flags.width)) / to_apply
 		end
 	end
 end
@@ -40,9 +75,9 @@ function compile_input(format_specifier, format_function)
 	local flags = "*#+0-?=!"
 
 	search = search * G(S(flags)^(-#flags), "flags")
-	search = search * G(l.digit^0 / tonumber, "width")
-	search = search * G(stream.maybe(P'.' * C(l.digit^1)) / tonumber, "precision")
-	search = search * P(format_specifier) * #(-l.alpha)
+	search = search * G(patt.digit^0 / tonumber, "width")
+	search = search * G(patt.opt(P'.' * C(patt.digit^1)) / tonumber, "precision")
+	search = search * P(format_specifier) * #(-patt.alpha)
 
 	local function parse_fields(data)
 		local function exists(x) return (x ~= nil) end
@@ -68,33 +103,20 @@ function compile_input(format_specifier, format_function)
 	return search
 end
 
-function stream.add_converter (cvt)
+function patt.add (cvt)
 	if (cvt.read ~= nil) then
-		stream.inputs[cvt.format] = cvt.read
+		patt.inputs[cvt.format] = cvt.read
 	end
 
 	if (cvt.write ~= nil) then
-		stream.outputs[cvt.format] = cvt.write
+		patt.outputs[cvt.format] = cvt.write
 	end
-end
-
-local function floating_point (flags)
-	pprint(flags)
-
-	local mpm = stream.maybe(S("+-"))
-	local digits = l.digit^1
-	local dot = P(".")
-	local exp = S("eE")
-
-	local float = mpm * digits * stream.maybe(dot * digits) * stream.maybe(exp * mpm * digits)
-
-	return C(float) / tonumber
 end
 
 function all_formats()
 	local output = P(false)
 
-	for key, value in pairs(stream.inputs) do
+	for key, value in pairs(patt.inputs) do
 		output = output + compile_input(key, value)
 	end
 
@@ -123,12 +145,16 @@ function parse_in (to_parse)
 	return lpeg.Ct(C(output))
 end
 
-stream.add_converter { format = "s", read = stream.basic_read(P(1) - l.space, tostring) }
-stream.add_converter { format = "d", read = stream.basic_read(l.digit, tonumber) }
-stream.add_converter { format = "f", read = floating_point }
+patt.add { format = "s", read = patt.basic_read((P(1)-patt.space)^1, tostring) }
+patt.add { format = "c", read = patt.basic_read(P(1)^1, tostring) }
+patt.add { format = "d", read = patt.basic_read(patt.signed_int, tonumber) }
+patt.add { format = "f", read = patt.basic_read(patt.floating_point, tonumber) }
+patt.add { format = "e", read = patt.basic_read(patt.floating_point, tonumber) }
+patt.add { format = "g", read = patt.basic_read(patt.floating_point, tonumber) }
 
-check = parse_in("%d) %4s %5.4f")
-test = check:match("1) Num: 3.14e15")
+check = parse_in("%d) %4s %4f%d")
+test = check:match("1) Num: 3.1415")
+
 
 if (test ~= nil) then
 	for key, value in pairs(test) do
