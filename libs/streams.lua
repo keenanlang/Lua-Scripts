@@ -5,6 +5,7 @@ P   = lpeg.P
 C   = lpeg.C
 G   = lpeg.Cg
 S   = lpeg.S
+R   = lpeg.R
 T   = lpeg.Ct
 I   = lpeg.Cp
 Cmt = lpeg.Cmt
@@ -22,80 +23,72 @@ function patt.opt(pattern)
 end
 
 patt.sign = S("+-")
-patt.max_width = patt.max_width
 patt.check = {
-	optsign = function ()
-		if (hash) then   return patt.opt(patt.sign) * patt.space^0
-		else             return patt.opt(patt.sign) end
+	if_hash = function () 
+		return function(pattern)
+			if (hash) then return pattern
+			else           return lpeg.P(true)
+			end
+		end 
 	end,
 	
+	if_neg = function () 
+		return function(pattern)
+			if (negative) then return pattern
+			else               return lpeg.P(true)
+			end
+		end
+	end,
+	
+	optsign = function ()         return patt.opt(patt.sign) * patt.if_hash(patt.space^0) end,
 	uint = function ()            return patt.digit^1 end,
 	decimal = function ()         return patt.uint * patt.opt(P'.' * patt.uint) end,
 	signed_int = function ()      return patt.optsign * patt.uint end,
 	signed_decimal = function ()  return patt.optsign * patt.decimal end,
-	floating_point = function ()  return patt.signed_decimal * patt.opt(S("eE") * patt.signed_int) end
+	floating_point = function ()  return patt.signed_decimal * patt.opt(S'eE' * patt.signed_int) end,
+	octal = function()            return patt.if_neg(patt.optsign) * R'07'^1 end,
+	hexadecimal = function()      return patt.if_neg(patt.optsign) * patt.opt(P'0' * S'xX') * (patt.digit + R'af' + R'AF')^1 end
 }
 
-local patt_meta = {
+setmetatable(patt, {
 	__index = function(self, key)
-		if (self.check[key] ~= nil) then
-			return self.check[key]()
-		end
-
-		return nil
+		return self.check[key]()
 	end
-}
-
-setmetatable(patt, patt_meta)
+})
 
 
 function patt.max_width(pattern, max_width, exact_width)
-	if (max_width == nil) then
-		return pattern
-	end
-
-	if (exact_width == nil or exact_width == false) then
-		return Cmt(P(true),
-			function(s, i)
-				local match = nil
-				local last_match = nil
-				local last_offset = 0
-				local extract
-				local offset
-
-				for index = 1, max_width do
-					extract, offset = lpeg.match(C(P(index)) * I(), s, i)
-
-					if (not offset) then
-						return last_offset or false
-					end
-
-					match = lpeg.match(C(pattern), extract)
-
-					if (match) then
-						last_match = match
-
-						if (#match == #extract) then
-							last_offset = offset
-						end
-					end
-				end
-
-				return last_offset
-			end)
-	end
+	if (max_width == nil) then return pattern end
+	
+	local min_width = 1
+	
+	if (exact_width == true) then min_width = max_width end
 
 	return Cmt(P(true),
 		function(s, i)
-			local extract, offset = lpeg.match(C(P(max_width)) + I(), s, i)
+			local match, last_match
+			local last_offset = nil
+			local extract, offset
 
-			if (not offset) then  return false end
+			for index = min_width, max_width do
+				local extract, offset = lpeg.match(C(P(index)) * I(), s, i)
 
-			if (lpeg.match(C(pattern), extract)) then
-				return offset
-			else
-				return false
+				if (not offset) then
+					return last_offset or false
+				end
+
+				match = lpeg.match(C(pattern), extract)
+
+				if (match) then
+					last_match = match
+
+					if (#match == #extract) then
+						last_offset = offset
+					end
+				end
 			end
+
+			return last_offset
 		end)
 end
 
@@ -105,12 +98,12 @@ function patt.read (datatable)
 	end
 
 	return function(flags)
-
 		local e = {}
 		e.patt = patt
 		e.lpeg = lpeg
 		e.hash = flags.hash
-
+		e.negative = flags.pad_left
+		
 		local output = load("return (" .. datatable.pattern .. ")", "=(load)", "t", e)()
 
 		output = patt.max_width(output, flags.width, flags.exact_width)
@@ -183,28 +176,34 @@ local function parse_in (to_parse)
 	local rawtext = (P(1) - '%')^1 / P
 	local ctrl = P'%%' / "%%"
 	local item = rawtext + converter + ctrl
-	local line = T(item^1)
+	local line = lpeg.Cf(item^1, function(x,y) return x*y end)
 
-	local match_table = line:match(to_parse)
+	local compiled_pattern = line:match(to_parse)
+	
+	if (not compiled_pattern) then  error("Input line not parse-able") end
 
-	if (match_table == nil) then
-		error("Input line not parse-able")
-	end
+	return T(C(compiled_pattern)) / table.unpack
+end
 
-	local output = P(true)
-
-	for key, value in pairs(match_table) do
-		output = output * value
-	end
-
-	return T(C(output)) / table.unpack
+local function strip_spaces(toparse)
+	return table.pack(toparse:gsub(" ", ""))[1]
 end
 
 local function tofloat(toparse)
-	trimmed = toparse:gsub(" ", "")
-	return tonumber(trimmed)
+	return tonumber(strip_spaces(toparse))
 end
 
+local function octtonumber(toparse)
+	return tonumber(strip_spaces(toparse), 8)
+end
+
+local function hextonumber(toparse)
+	local replace = toparse:gsub("0x", "")
+	replace = replace:gsub("0X", "")
+	return tonumber(strip_spaces(replace), 16)
+end
+
+-- String Formats
 stream.add_format {
 	identifier = "s",
 	read = patt.read {
@@ -217,6 +216,8 @@ stream.add_format {
 			pattern = [[lpeg.P(1)^1]],
 			conversion = tostring } }
 
+			
+-- Integer Formats
 stream.add_format {
 	identifier = "d",
 	read = patt.read {
@@ -224,10 +225,30 @@ stream.add_format {
 			conversion = tonumber } }
 
 stream.add_format {
+	identifier = "u",
+	read = patt.read {
+			pattern    = [[patt.uint]],
+			conversion = tonumber } }			
+			
+stream.add_format {
+	identifier = "o",
+	read = patt.read {
+			pattern    = [[patt.octal]],
+			conversion = octtonumber } }
+
+stream.add_format {
+	identifier = "x",
+	read = patt.read {
+			pattern    = [[patt.hexadecimal]],
+			conversion = hextonumber } }
+			
+-- Double Formats
+stream.add_format {
 	identifier = "f",
 	read = patt.read {
 			pattern      = [[patt.floating_point]],
 			conversion   = tofloat } }
+			
 stream.add_format {
 	identifier = "e",
 	read = patt.read {
@@ -240,16 +261,26 @@ stream.add_format {
 			pattern      = [[patt.floating_point]],
 			conversion   = tofloat } }
 
+stream.add_format {
+	identifier = "E",
+	read = patt.read {
+			pattern      = [[patt.floating_point]],
+			conversion   = tofloat } }
 
-check = parse_in("%5f%d%s")
-matched, a, b, c = check:match("41e17123hello")
+stream.add_format {
+	identifier = "G",
+	read = patt.read {
+			pattern      = [[patt.floating_point]],
+			conversion   = tofloat } }
+
+--check = parse_in("%fabc%d%s")
+--matched, a, b, c = check:match("41e14abc123hello")
+
+check = parse_in("%#-x")
+matched, a, b, c = check:match("-0xABC")
 
 if (matched) then
 	print(a,b,c)
-
-	-- for key, value in pairs(test) do
-		-- print(tostring(value) .. " -> " .. type(value))
-	-- end
 else
 	print("Did not match")
 end
