@@ -1,6 +1,15 @@
 lpeg = require("lpeg")
 pprint = require("pprint")
 
+P   = lpeg.P
+C   = lpeg.C
+G   = lpeg.Cg
+S   = lpeg.S
+T   = lpeg.Ct
+I   = lpeg.Cp
+Cmt = lpeg.Cmt
+Cc  = lpeg.Cc
+
 local stream = {}
 stream.inputs = {}
 stream.outputs = {}
@@ -8,16 +17,37 @@ stream.outputs = {}
 local patt = {}
 lpeg.locale(patt)
 
-patt.P = lpeg.P
-patt.C = lpeg.C
-patt.G = lpeg.Cg
-patt.S = lpeg.S
-patt.T = lpeg.Ct
-patt.I = lpeg.Cp
-patt.Cmt = lpeg.Cmt
-patt.Cc = lpeg.Cc
+function patt.opt(pattern)
+	return pattern^-1
+end
 
-patt.match = lpeg.match
+patt.sign = S("+-")
+patt.max_width = patt.max_width
+patt.check = {
+	optsign = function ()
+		if (hash) then   return patt.opt(patt.sign) * patt.space^0
+		else             return patt.opt(patt.sign) end
+	end,
+	
+	uint = function ()            return patt.digit^1 end,
+	decimal = function ()         return patt.uint * patt.opt(P'.' * patt.uint) end,
+	signed_int = function ()      return patt.optsign * patt.uint end,
+	signed_decimal = function ()  return patt.optsign * patt.decimal end,
+	floating_point = function ()  return patt.signed_decimal * patt.opt(S("eE") * patt.signed_int) end
+}
+
+local patt_meta = {
+	__index = function(self, key)
+		if (self.check[key] ~= nil) then
+			return self.check[key]()
+		end
+
+		return nil
+	end
+}
+
+setmetatable(patt, patt_meta)
+
 
 function patt.max_width(pattern, max_width, exact_width)
 	if (max_width == nil) then
@@ -25,7 +55,7 @@ function patt.max_width(pattern, max_width, exact_width)
 	end
 
 	if (exact_width == nil or exact_width == false) then
-		return lpeg.Cmt(lpeg.P(true),
+		return Cmt(P(true),
 			function(s, i)
 				local match = nil
 				local last_match = nil
@@ -34,13 +64,13 @@ function patt.max_width(pattern, max_width, exact_width)
 				local offset
 
 				for index = 1, max_width do
-					extract, offset = patt.match(patt.C(patt.P(index)) * patt.I(), s, i)
+					extract, offset = lpeg.match(C(P(index)) * I(), s, i)
 
 					if (not offset) then
 						return last_offset or false
 					end
 
-					match = patt.match(patt.C(pattern), extract)
+					match = lpeg.match(C(pattern), extract)
 
 					if (match) then
 						last_match = match
@@ -55,30 +85,18 @@ function patt.max_width(pattern, max_width, exact_width)
 			end)
 	end
 
-	return patt.Cmt(patt.P(true),
+	return Cmt(P(true),
 		function(s, i)
-			local extract, offset = patt.match(patt.C(patt.P(max_width)) + patt.I(), s, i)
+			local extract, offset = lpeg.match(C(P(max_width)) + I(), s, i)
 
 			if (not offset) then  return false end
 
-			if (patt.match(patt.C(pattern), extract)) then
+			if (lpeg.match(C(pattern), extract)) then
 				return offset
 			else
 				return false
 			end
 		end)
-end
-
-function patt.opt(pattern)
-	return pattern^-1
-end
-
-function patt.if_hash(pattern, hash)
-	if (hash) then
-		return pattern
-	else
-		return patt.P(true)
-	end
 end
 
 function patt.read (datatable)
@@ -89,43 +107,20 @@ function patt.read (datatable)
 	return function(flags)
 
 		local e = {}
-		e.patt = {}
+		e.patt = patt
 		e.lpeg = lpeg
-
-		lpeg.locale(e.patt)
-
-		e.patt.P = lpeg.P
-		e.patt.C = lpeg.C
-		e.patt.G = lpeg.Cg
-		e.patt.S = lpeg.S
-		e.patt.T = lpeg.Ct
-		e.patt.I = lpeg.Cp
-		e.patt.Cmt = lpeg.Cmt
-		e.patt.Cc = lpeg.Cc
-
-		e.patt.match = lpeg.match
-
-		e.patt.opt = patt.opt
-		e.patt.if_hash = patt.if_hash
-		e.patt.max_width = patt.max_width
-		e.patt.sign = patt.S("+-")
-		e.patt.optsign = e.patt.opt(e.patt.sign) * e.patt.if_hash(e.patt.space^0, flags.hash)
-		e.patt.uint = e.patt.digit^1
-		e.patt.decimal = e.patt.uint * e.patt.opt(patt.P'.' * e.patt.uint)
-		e.patt.signed_int = e.patt.optsign * e.patt.uint
-		e.patt.signed_decimal = e.patt.optsign * e.patt.decimal
-		e.patt.floating_point = e.patt.signed_decimal * e.patt.opt(patt.S("eE") * e.patt.signed_int)
+		e.hash = flags.hash
 
 		local output = load("return (" .. datatable.pattern .. ")", "=(load)", "t", e)()
 
 		output = patt.max_width(output, flags.width, flags.exact_width)
 
 		if      (not flags.ignore and flags.strict) then
-			output = patt.C(output) / datatable.conversion
+			output = C(output) / datatable.conversion
 		elseif  (not flags.ignore and not flags.strict) then
-			output = (patt.C(output) + patt.Cc(datatable.defaultvalue)) / datatable.conversion
+			output = (C(output) + Cc(datatable.defaultvalue)) / datatable.conversion
 		elseif  (flags.ignore and not flags.strict) then
-			output = output + patt.P(true)
+			output = output + P(true)
 		end
 
 		return output
@@ -133,13 +128,13 @@ function patt.read (datatable)
 end
 
 function compile_input(format_specifier, format_function)
-	local search = patt.P'%'
+	local search = P'%'
 	local flags = "*#+0-?=!"
 
-	search = search * patt.G(patt.S(flags)^(-#flags), "flags")
-	search = search * patt.G(patt.digit^0 / tonumber, "width")
-	search = search * patt.G(patt.opt(patt.P'.' * patt.C(patt.digit^1)) / tonumber, "precision")
-	search = search * patt.P(format_specifier)
+	search = search * G(S(flags)^(-#flags), "flags")
+	search = search * G(patt.digit^0 / tonumber, "width")
+	search = search * G(patt.opt(P'.' * C(patt.digit^1)) / tonumber, "precision")
+	search = search * P(format_specifier)
 
 	local function parse_fields(data)
 		local function exists(x) return (x ~= nil) end
@@ -160,21 +155,21 @@ function compile_input(format_specifier, format_function)
 		return output
 	end
 
-	return patt.T(search) / parse_fields / format_function
+	return T(search) / parse_fields / format_function
 end
 
 function stream.add_format (cvt)
 	if (cvt.read ~= nil) then
-		stream.inputs[cvt.format] = cvt.read
+		stream.inputs[cvt.identifier] = cvt.read
 	end
 
 	if (cvt.write ~= nil) then
-		stream.outputs[cvt.format] = cvt.write
+		stream.outputs[cvt.identifier] = cvt.write
 	end
 end
 
 local function all_formats()
-	local output = patt.P(false)
+	local output = P(false)
 
 	for key, value in pairs(stream.inputs) do
 		output = output + compile_input(key, value)
@@ -185,10 +180,10 @@ end
 
 local function parse_in (to_parse)
 	local converter = all_formats()
-	local rawtext = (patt.P(1) - '%')^1 / patt.P
-	local ctrl = patt.P'%%' / "%%"
+	local rawtext = (P(1) - '%')^1 / P
+	local ctrl = P'%%' / "%%"
 	local item = rawtext + converter + ctrl
-	local line = patt.T(item^1)
+	local line = T(item^1)
 
 	local match_table = line:match(to_parse)
 
@@ -196,13 +191,13 @@ local function parse_in (to_parse)
 		error("Input line not parse-able")
 	end
 
-	local output = patt.P(true)
+	local output = P(true)
 
 	for key, value in pairs(match_table) do
 		output = output * value
 	end
 
-	return patt.T(patt.C(output)) / table.unpack
+	return T(C(output)) / table.unpack
 end
 
 local function tofloat(toparse)
@@ -211,36 +206,36 @@ local function tofloat(toparse)
 end
 
 stream.add_format {
-	format = "s",
+	identifier = "s",
 	read = patt.read {
-			pattern = [[(patt.P(1)-patt.space)^1]],
+			pattern = [[(lpeg.P(1)-patt.space)^1]],
 			conversion = tostring } }
 
 stream.add_format {
-	format = "c",
+	identifier = "c",
 	read = patt.read {
-			pattern = [[patt.P(1)^1]],
+			pattern = [[lpeg.P(1)^1]],
 			conversion = tostring } }
 
 stream.add_format {
-	format = "d",
+	identifier = "d",
 	read = patt.read {
 			pattern    = [[patt.signed_int]],
 			conversion = tonumber } }
 
 stream.add_format {
-	format = "f",
+	identifier = "f",
 	read = patt.read {
 			pattern      = [[patt.floating_point]],
 			conversion   = tofloat } }
 stream.add_format {
-	format = "e",
+	identifier = "e",
 	read = patt.read {
 			pattern      = [[patt.floating_point]],
 			conversion   = tofloat } }
 
 stream.add_format {
-	format = "g",
+	identifier = "g",
 	read = patt.read {
 			pattern      = [[patt.floating_point]],
 			conversion   = tofloat } }
