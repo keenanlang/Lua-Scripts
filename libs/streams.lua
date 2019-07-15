@@ -1,15 +1,16 @@
 lpeg = require("lpeg")
 pprint = require("pprint")
+asyn = require("asyn")
 
-P   = lpeg.P
-C   = lpeg.C
-G   = lpeg.Cg
-S   = lpeg.S
-R   = lpeg.R
-T   = lpeg.Ct
-I   = lpeg.Cp
-Cmt = lpeg.Cmt
-Cc  = lpeg.Cc
+local P   = lpeg.P
+local C   = lpeg.C
+local G   = lpeg.Cg
+local S   = lpeg.S
+local R   = lpeg.R
+local T   = lpeg.Ct
+local I   = lpeg.Cp
+local Cmt = lpeg.Cmt
+local Cc  = lpeg.Cc
 
 local stream = {}
 stream.inputs = {}
@@ -20,9 +21,10 @@ function stream.generate_patterns(flags, dest)
 
 	lpeg.locale(out)
 	
-	out.L = lpeg.P
+	out.P = lpeg.P
 	out.R = lpeg.R
 	out.S = lpeg.S
+	out.C = lpeg.C
 
 	out.opt = function (pattern)
 		return pattern^-1
@@ -43,12 +45,10 @@ function stream.generate_patterns(flags, dest)
 	out.sign =           out.S("+-")
 	out.optsign =        out.opt(out.sign) * out.if_hash(out.space^0)
 	out.uint =           out.digit^1
-	out.decimal =        out.uint * out.opt(out.L'.' * out.uint)
+	out.decimal =        out.uint * out.opt(out.P'.' * out.uint)
 	out.signed_int =     out.optsign * out.uint
 	out.signed_decimal = out.optsign * out.decimal
 	out.floating_point = out.signed_decimal * out.opt(out.S'eE' * out.signed_int)
-	out.octal =          out.if_neg(out.optsign) * out.R'07'^1
-	out.hexadecimal =    out.if_neg(out.optsign) * out.opt(out.L'0' * out.S'xX') * (out.digit + out.R'af' + out.R'AF')^1
 	
 	out.max_width = function(pattern, max_width, exact_width)
 		if (max_width == nil) then return pattern end
@@ -97,18 +97,17 @@ function stream.basic_reader (datatable)
 		local e = {}
 		
 		stream.generate_patterns(flags, e)
-		e.lpeg = lpeg
 		e.flags = flags
 		
 		local output = load("return (" .. datatable.pattern .. ")", "=(load)", "t", e)()
 
-		output = C(e.max_width(output, flags.width, flags.exact_width))
-
-		if (not flags.strict) then
-			output = output + Cc(datatable.defaultvalue)
-		end
+		output = T(e.max_width(output, flags.width, flags.exact_width))
 		
-		output = output / datatable.conversion
+		output = output / table.unpack / datatable.conversion
+		
+		if (not flags.strict) then
+			output = output / function (x) return x or datatable.defaultvalue end
+		end
 		
 		if (flags.ignore) then
 			output = G(output, "ignore")
@@ -135,13 +134,13 @@ function compile_input(format_specifier, format_function)
 		output.width = data.width
 		output.precision = data.precision
 
-		output.strict = not exists(data.flags:find("?"))
-		output.ignore = exists(data.flags:find("*"))
+		output.strict =  not exists(data.flags:find("?"))
+		output.ignore =      exists(data.flags:find("*"))
 		output.exact_width = exists(data.flags:find("!"))
-		output.left_pad = exists(data.flags:find("-"))
-		output.pad_zeroes = exists(data.flags:find("0"))
-		output.compare = exists(data.flags:find("="))
-		output.hash = exists(data.flags:find("#"))
+		output.left_pad =    exists(data.flags:find("-"))
+		output.pad_zeroes =  exists(data.flags:find("0"))
+		output.compare =     exists(data.flags:find("="))
+		output.hash =        exists(data.flags:find("#"))
 
 		return output
 	end
@@ -159,18 +158,25 @@ function stream.add_format (cvt)
 	end
 end
 
-local function all_formats()
-	local output = P(false)
-
-	for key, value in pairs(stream.inputs) do
-		output = output + compile_input(key, value)
-	end
-
-	return output
+local function strip(toparse)
+	return table.pack(toparse:gsub(" ", ""))[1]
 end
 
-local function parse_in (to_parse)
-	local converter = all_formats()
+local function hextonumber(sign, val)
+	if (not val) then return 0 end
+
+	if (strip(sign) == '-') then return -1 * tonumber(val, 16)
+	else                         return tonumber(val, 16)
+	end
+end
+
+function stream.read(to_parse)
+	local converter = P(false)
+
+	for key, value in pairs(stream.inputs) do
+		converter = converter + compile_input(key, value)
+	end
+	
 	local rawtext = (P(1) - '%')^1 / P
 	local ctrl = P'%%' / "%%"
 	local item = rawtext + converter + ctrl
@@ -180,36 +186,26 @@ local function parse_in (to_parse)
 	
 	if (not compiled_pattern) then  error("Input line not parse-able") end
 
-	return T(C(compiled_pattern)) / table.unpack
-end
-
-local function strip(toparse, characters)
-	return table.pack(toparse:gsub(characters, ""))[1]
-end
-
-local function tofloat(toparse)
-	return tonumber(strip(toparse, " "))
-end
-
-local function octtonumber(toparse)
-	return tonumber(strip(toparse, " "), 8)
-end
-
-local function hextonumber(toparse, b)
-	return tonumber(strip(strip(strip(toparse, " "), "0x"), "0X"), 16)
+	local readback = asyn.read(PORT)
+	
+	if (not readback) then
+		error("No data read from port: " .. PORT)
+	end
+	
+	return (T(C(compiled_pattern)) / table.unpack):match(readback)
 end
 
 -- String Formats
 stream.add_format {
 	identifier = "s",
 	read = stream.basic_reader {
-			pattern = [[(lpeg.P(1)-space)^1]],
+			pattern = [[ C((P(1) - space)^1) ]],
 			conversion = tostring } }
 
 stream.add_format {
 	identifier = "c",
 	read = stream.basic_reader {
-			pattern = [[lpeg.P(1)^1]],
+			pattern = [[ C(P(1)^1) ]],
 			conversion = tostring } }
 
 			
@@ -217,63 +213,66 @@ stream.add_format {
 stream.add_format {
 	identifier = "d",
 	read = stream.basic_reader {
-			pattern    = [[signed_int]],
+			pattern    = [[ C(signed_int) ]],
 			conversion = tonumber } }
 
 stream.add_format {
 	identifier = "u",
 	read = stream.basic_reader {
-			pattern    = [[uint]],
+			pattern    = [[ C(uint) ]],
 			conversion = tonumber } }			
 			
 stream.add_format {
 	identifier = "o",
 	read = stream.basic_reader {
-			pattern    = [[octal]],
-			conversion = octtonumber } }
+			pattern    = [[ C(if_neg(optsign) * R'07'^1) ]],
+			conversion = function (x) return tonumber(strip(x), 8) end } }
 
 stream.add_format {
 	identifier = "x",
 	read = stream.basic_reader {
-			pattern    = [[hexadecimal]],
+			pattern    = [[ C(if_neg(optsign)) * opt(P'0' * S'xX') * C((digit + R'af' + R'AF')^1) ]],
 			conversion = hextonumber } }
 			
 -- Double Formats
 stream.add_format {
 	identifier = "f",
 	read = stream.basic_reader {
-			pattern      = [[floating_point]],
-			conversion   = tofloat } }
+			pattern      = [[ C(floating_point) ]],
+			conversion   = function (x) return tonumber(strip(x)) end } }
 			
 stream.add_format {
 	identifier = "e",
 	read = stream.basic_reader {
-			pattern      = [[floating_point]],
-			conversion   = tofloat } }
+			pattern      = [[ C(floating_point) ]],
+			conversion   = function (x) return tonumber(strip(x)) end } }
 
 stream.add_format {
 	identifier = "g",
 	read = stream.basic_reader {
-			pattern      = [[floating_point]],
-			conversion   = tofloat } }
+			pattern      = [[ C(floating_point) ]],
+			conversion   = function (x) return tonumber(strip(x)) end } }
 
 stream.add_format {
 	identifier = "E",
 	read = stream.basic_reader {
-			pattern      = [[floating_point]],
-			conversion   = tofloat } }
+			pattern      = [[ C(floating_point) ]],
+			conversion   = function (x) return tonumber(strip(x)) end } }
 
 stream.add_format {
 	identifier = "G",
 	read = stream.basic_reader {
-			pattern      = [[floating_point]],
-			conversion   = tofloat } }
+			pattern      = [[ C(floating_point) ]],
+			conversion   = function (x) return tonumber(strip(x)) end } }
+			
+			
+asyn.write("GET / HTTP/1.0\n\n", PORT)
+matched, a, b, c = stream.read("HTTP/%f %d Moved Permanently")
 
---check = parse_in("%fabc%*d%s")
---matched, a, b, c = check:match("41e14abc123hello")
+--:match("- 41e14abc123hello")
 
-check = parse_in("%#-x")
-matched, a, b, c = check:match("- 0xABC")
+--check = parse_in("%#-x")
+--matched, a, b, c = check:match("- 0xABC")
 
 if (matched) then
 	print(a,b,c)
