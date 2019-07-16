@@ -2,16 +2,6 @@ lpeg = require("lpeg")
 pprint = require("pprint")
 asyn = require("asyn")
 
-local P   = lpeg.P
-local C   = lpeg.C
-local G   = lpeg.Cg
-local S   = lpeg.S
-local R   = lpeg.R
-local T   = lpeg.Ct
-local I   = lpeg.Cp
-local Cmt = lpeg.Cmt
-local Cc  = lpeg.Cc
-
 local stream = {}
 stream.inputs = {}
 stream.outputs = {}
@@ -26,21 +16,9 @@ function stream.generate_patterns(flags, dest)
 	out.S = lpeg.S
 	out.C = lpeg.C
 
-	out.opt = function (pattern)
-		return pattern^-1
-	end
-	
-	out.if_hash = function(pattern)
-		if (flags.hash) then return pattern
-		else                 return lpeg.P(true)
-		end
-	end 
-	
-	out.if_neg = function(pattern)
-		if (flags.left_pad) then return pattern
-		else                     return lpeg.P(true)
-		end
-	end
+	out.opt =     function(pattern) return pattern^-1 end
+	out.if_hash = function(pattern) return (flags.hash) and pattern or out.P(true) end 
+	out.if_neg =  function(pattern) return (flags.left_pad) and pattern or out.P(true) end
 	
 	out.sign =           out.S("+-")
 	out.optsign =        out.opt(out.sign) * out.if_hash(out.space^0)
@@ -51,33 +29,21 @@ function stream.generate_patterns(flags, dest)
 	out.floating_point = out.signed_decimal * out.opt(out.S'eE' * out.signed_int)
 	
 	out.max_width = function(pattern, max_width, exact_width)
-		if (max_width == nil) then return pattern end
+		if (not max_width) then return pattern end
 		
-		local min_width = 1
-		
-		if (exact_width == true) then min_width = max_width end
+		local min_width = (exact_width == true) and max_width or 1
 	
-		return Cmt(P(true),
+		return Cmt(out.P(true),
 			function(s, i)
-				local match, last_match
 				local last_offset = nil
-				local extract, offset
 	
 				for index = min_width, max_width do
-					local extract, offset = lpeg.match(C(P(index)) * I(), s, i)
+					local extract, offset = lpeg.match(out.C(out.P(index)) * lpeg.Cp(), s, i)
 	
-					if (not offset) then
-						return last_offset or false
-					end
+					if (not offset) then return last_offset or false end
 	
-					match = lpeg.match(C(pattern), extract)
-	
-					if (match) then
-						last_match = match
-	
-						if (#match == #extract) then
-							last_offset = offset
-						end
+					if (lpeg.match(pattern + out.P(-1), extract)) then
+						last_offset = offset
 					end
 				end
 	
@@ -101,7 +67,7 @@ function stream.basic_reader (datatable)
 		
 		local output = load("return (" .. datatable.pattern .. ")", "=(load)", "t", e)()
 
-		output = T(e.max_width(output, flags.width, flags.exact_width))
+		output = lpeg.Ct(e.max_width(output, flags.width, flags.exact_width))
 		
 		output = output / table.unpack / datatable.conversion
 		
@@ -109,21 +75,21 @@ function stream.basic_reader (datatable)
 			output = output / function (x) return x or datatable.defaultvalue end
 		end
 		
-		if (flags.ignore) then
-			output = G(output, "ignore")
-		end
+		if (flags.ignore) then output = lpeg.G(output, "ignore") end
 		
 		return output
 	end
 end
 
 function compile_input(format_specifier, format_function)
+	local P = lpeg.P
+
 	local search = P'%'
 	local flags = "*#+0-?=!"
 	
-	search = search * G(S(flags)^(-#flags), "flags")
-	search = search * G(lpeg.locale().digit^0 / tonumber, "width")
-	search = search * G((P'.' * C(lpeg.locale().digit^1))^-1 / tonumber, "precision")
+	search = search * lpeg.Cg(lpeg.S(flags)^(-#flags), "flags")
+	search = search * lpeg.Cg(lpeg.locale().digit^0 / tonumber, "width")
+	search = search * lpeg.Cg((P'.' * lpeg.C(lpeg.locale().digit^1))^-1 / tonumber, "precision")
 	search = search * P(format_specifier)
 
 	local function parse_fields(data)
@@ -145,7 +111,7 @@ function compile_input(format_specifier, format_function)
 		return output
 	end
 
-	return T(search) / parse_fields / format_function
+	return lpeg.Ct(search) / parse_fields / format_function
 end
 
 function stream.add_format (cvt)
@@ -171,6 +137,8 @@ local function hextonumber(sign, val)
 end
 
 function stream.read(to_parse)
+	local P = lpeg.P
+
 	local converter = P(false)
 
 	for key, value in pairs(stream.inputs) do
@@ -192,7 +160,7 @@ function stream.read(to_parse)
 		error("No data read from port: " .. PORT)
 	end
 	
-	return (T(C(compiled_pattern)) / table.unpack):match(readback)
+	return (lpeg.Ct(lpeg.C(compiled_pattern)) / table.unpack):match(readback)
 end
 
 -- String Formats
@@ -265,7 +233,9 @@ stream.add_format {
 			pattern      = [[ C(floating_point) ]],
 			conversion   = function (x) return tonumber(strip(x)) end } }
 			
-			
+
+ReadTimeout = 4.0
+--asyn.write("GET / HTTP/1.0\n\n", PORT)
 asyn.write("GET / HTTP/1.0\n\n", PORT)
 matched, a, b, c = stream.read("HTTP/%f %d Moved Permanently")
 
