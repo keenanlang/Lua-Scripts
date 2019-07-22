@@ -1,5 +1,4 @@
 lpeg = require("lpeg")
-pprint = require("pprint")
 asyn = require("asyn")
 
 local stream = {}
@@ -60,9 +59,7 @@ function stream.basic_reader (datatable)
 	end
 
 	return function(flags)
-		local e = {}
-		
-		stream.generate_patterns(flags, e)
+		local e = stream.generate_patterns(flags)
 		e.flags = flags
 		
 		local output = load("return (" .. datatable.pattern .. ")", "=(load)", "t", e)()
@@ -136,7 +133,7 @@ local function hextonumber(sign, val)
 	end
 end
 
-function stream.read(to_parse)
+function stream.match(specifier, input)
 	local P = lpeg.P
 
 	local converter = P(false)
@@ -149,18 +146,37 @@ function stream.read(to_parse)
 	local ctrl = P'%%' / "%%"
 	local item = rawtext + converter + ctrl
 	local line = lpeg.Cf(item^1, function(x,y) return x*y end)
-
-	local compiled_pattern = line:match(to_parse)
 	
-	if (not compiled_pattern) then  error("Input line not parse-able") end
+	local compiled_pattern = line:match(specifier)
+	
+	if (not compiled_pattern) then  error("Input specifier not parse-able") end
+	
+	return (lpeg.Ct(lpeg.C(compiled_pattern)) / table.unpack):match(input)
+end
 
-	local readback = asyn.read(PORT)
+local function localread(self, specifier)
+	if (not self.port) then return nil end
+
+	local readback = asyn.read(self.port)
 	
 	if (not readback) then
-		error("No data read from port: " .. PORT)
+		error("No data read from port: " .. self.port)
 	end
 	
-	return (lpeg.Ct(lpeg.C(compiled_pattern)) / table.unpack):match(readback)
+	return stream.match(specifier, readback)
+end
+
+local function localwrite(self, data)
+	return asyn.write(data, self.port)
+end
+
+function stream.wrap(portname)
+	local output = {port=portname}
+	
+	output.read = localread
+	output.write = localwrite
+	
+	return output
 end
 
 -- String Formats
@@ -233,19 +249,4 @@ stream.add_format {
 			pattern      = [[ C(floating_point) ]],
 			conversion   = function (x) return tonumber(strip(x)) end } }
 			
-
-ReadTimeout = 4.0
---asyn.write("GET / HTTP/1.0\n\n", PORT)
-asyn.write("GET / HTTP/1.0\n\n", PORT)
-matched, a, b, c = stream.read("HTTP/%f %d Moved Permanently")
-
---:match("- 41e14abc123hello")
-
---check = parse_in("%#-x")
---matched, a, b, c = check:match("- 0xABC")
-
-if (matched) then
-	print(a,b,c)
-else
-	print("Did not match")
-end
+return stream
