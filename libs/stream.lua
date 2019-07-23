@@ -32,7 +32,7 @@ function stream.generate_patterns(flags, dest)
 		
 		local min_width = (exact_width == true) and max_width or 1
 	
-		return Cmt(out.P(true),
+		return lpeg.Cmt(out.P(true),
 			function(s, i)
 				local last_offset = nil
 	
