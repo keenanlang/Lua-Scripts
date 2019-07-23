@@ -1,3 +1,7 @@
+--[[
+	Development moved to https://github.com/keenanlang/bytestream
+  ]]--
+
 lpeg = require("lpeg")
 asyn = require("asyn")
 
