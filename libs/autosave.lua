@@ -81,7 +81,7 @@ function autosave.autobuild(settings)
 
 		autosave.addSearchPath(filepath)
 
-		doAfterIocInit(string.format("create_monitor_set('%s.req', %d, P=%s)", filename .. ", monitor, prefix))
+		doAfterIocInit(string.format("create_monitor_set('%s.req', %d, P=%s)", filename, monitor, prefix))
 	end
 
 	autosaveBuild(filepath .. "/" .. filename .. ".req", suffix, enable)
