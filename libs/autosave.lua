@@ -1,4 +1,4 @@
--- [[
+--[[
 		Lua library to handle autosave module setup.
 
 		addSearchPath - adds a given path to the requestfile path
@@ -89,7 +89,7 @@ autosave.CAReconnect = save_restoreSet_CAReconnect
 autosave.IncompleteSetsOk = save_restoreSet_IncompleteSetsOk
 autosave.DatedBackupFiles = save_restoreSet_DatedBackupFiles
 autosave.NumSeqFiles = save_restoreSet_NumSeqFiles
-autosave.SeqPeriodInSeconds = save_restoreSet_SeqPeriodInSections
+autosave.SeqPeriodInSeconds = save_restoreSet_SeqPeriodInSeconds
 autosave.CallbackTimeout = save_restoreSet_CallbackTimeout
 autosave.Debug = save_restoreSet_Debug
 
