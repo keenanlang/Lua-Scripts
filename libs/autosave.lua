@@ -12,7 +12,8 @@
 
 				filepath - where the autobuilt file should reside
 
-				filename - the name the autobuilt file should have
+				filename - the name the autobuilt files should have,
+				           don't include the ".sav/.req" extension
 
 				suffix   - the file suffix autobuild will search for
 				           to find req files to include
@@ -45,7 +46,7 @@
 			SeqPeriodInSeconds = 300
 			CallbackTimeout = -1
 			Debug = 0
-   ]]
+--]]
 
 local autosave = { }
 
@@ -71,19 +72,19 @@ function autosave.autobuild(settings)
 
 	if (enable) then
 		if (pass0) then
-			set_pass0_restoreFile(filename)
+			set_pass0_restoreFile(filename .. ".sav")
 		end
 
 		if (pass1) then
-			set_pass1_restoreFile(filename)
+			set_pass1_restoreFile(filename .. ".sav")
 		end
 
 		autosave.addSearchPath(filepath)
 
-		doAfterIocInit(string.format("create_monitor_set('%s', %d, P=%s)", filename, monitor, prefix))
+		doAfterIocInit(string.format("create_monitor_set('%s.req', %d, P=%s)", filename .. ", monitor, prefix))
 	end
 
-	autosaveBuild(filepath .. "/" .. filename, suffix, enable)
+	autosaveBuild(filepath .. "/" .. filename .. ".req", suffix, enable)
 end
 
 
