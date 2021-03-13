@@ -47,8 +47,8 @@ function modules.parseEnvPaths(filepath)
 		path  = path  .. ";" .. value .. separator .. "lib" .. separator .. arch .. separator .. "?.lua"
 	end
 
-	package.cpath = cpath
-	package.path = path
+	package.cpath = package.cpath .. ";" .. cpath
+	package.path = package.path .. ";" .. path
 end
 
 function modules.parseCdCommands(filepath)
@@ -68,7 +68,7 @@ function modules.parseCdCommands(filepath)
 		end
 	end
 
-	package.path = path
+	package.path = package.path .. ";" .. path
 end
 
 function modules.is_included(module_name)
