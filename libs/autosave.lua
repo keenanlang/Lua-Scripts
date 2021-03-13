@@ -78,6 +78,8 @@ function autosave.autobuild(settings)
 			set_pass1_restoreFile(filename)
 		end
 
+		autosave.addSearchPath(filepath)
+
 		doAfterIocInit(string.format("create_monitor_set('%s', %d, P=%s)", filename, monitor, prefix))
 	end
 
