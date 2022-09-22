@@ -26,26 +26,22 @@ function modules.parseEnvPaths(filepath)
 	local path = "." .. separator .. "?.lua"
 	local cpath = ""
 
-	if (arch:find("linux")) then
-		cpath = "." .. separator .. "?.so"
-	elseif (arch:find("win")) then
-		cpath = "." .. separator .. "?.dll"
-	end
-
-	for line in io.lines(filepath) do
-		local name, value = line:match('epicsEnvSet%("([a-zA-Z0-9_]+)","(.+)"%)')
-
-		modules.found[name] = value
-		epicsEnvSet(name, value)
-
+	function epicsEnvSet(key, val)
+		modules.found[key] = val
+		iocsh.epicsEnvSet(key, val)
+		
 		if (arch:find("linux")) then
-			cpath = cpath .. ";" .. value .. separator ..  "lib" .. separator .. arch .. separator .. "?.so"
+			cpath = cpath .. ";" .. val .. separator .. "lib" .. separator .. arch .. separator .. "?.so"
 		elseif (arch:find("win")) then
-			cpath = cpath .. ";" .. value .. separator ..  "lib" .. separator .. arch .. separator .. "?.dll"
+			cpath = cpath .. ";" .. val .. separator .. "lib" .. separator .. arch .. separator .. "?.dll"
 		end
-
-		path  = path  .. ";" .. value .. separator .. "lib" .. separator .. arch .. separator .. "?.lua"
+		
+		path = path .. ";" .. val .. separator .. "lib" .. separator .. arch .. separator .. "?.lua"
 	end
+	
+	dofile(filepath)
+	
+	epicsEnvSet = nil
 
 	package.cpath = package.cpath .. ";" .. cpath
 	package.path = package.path .. ";" .. path
