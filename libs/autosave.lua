@@ -50,14 +50,6 @@
 
 local autosave = { }
 
-function autosave.addSearchPath(path)
-	set_requestfile_path(path)
-end
-
-function autosave.setSavePath(path)
-	set_savefile_path(path)
-end
-
 function autosave.autobuild(settings)
 	local filepath = assert(settings.filepath)
 	local filename = assert(settings.filename)
@@ -87,6 +79,8 @@ function autosave.autobuild(settings)
 	autosaveBuild(filepath .. "/" .. filename .. ".req", suffix, enable)
 end
 
+autosave.addSearchPath = set_requestfile_path
+autosave.setSavePath = set_savefile_path
 
 autosave.CAReconnect = save_restoreSet_CAReconnect
 autosave.IncompleteSetsOk = save_restoreSet_IncompleteSetsOk
